@@ -323,6 +323,13 @@ public class SoundMixer
             s.Start = (s.Start + n) % maxFrames;
             s.Count -= n;
             if (s.Count == 0) s.Playing = false;
+            // A program's sound clock never quite matches this one, so its queue creeps up. Trimming it back once
+            // it's 40 ms over keeps the delay steady, instead of drifting up to 100 ms late and then jumping back.
+            if (s.Count > holdFrames + Rate / 25)
+            {
+                s.Start = (s.Start + s.Count - holdFrames) % maxFrames;
+                s.Count = holdFrames;
+            }
         }
     }
 

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Starts VR Video Streamer for Linux from wherever this folder is.
+here="$(dirname "$(readlink -f "$0")")"
+PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m vvs "$@"

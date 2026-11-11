@@ -23,3 +23,6 @@ release/
 *.token
 tunnel_key*
 settings.json
+
+# Python leftovers (Linux version)
+__pycache__/

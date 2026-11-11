@@ -20,12 +20,16 @@ Stream your desktop monitor, application windows, local video files, music files
 
 Needs Windows 10 (version 2004 or newer) or Windows 11, 64-bit.
 
-1. Download `VR-Video-Streamer-1.2.1.zip` from the link above and extract it.
+1. Download `VR-Video-Streamer-1.2.2.zip` from the link above and extract it.
 2. Open `VR Video Streamer.exe`. It offers to download FFmpeg, the video tool it needs, on first run.
 3. Select the video and sound you'd like to stream.
 4. Press **Start streaming** and paste the Video Player Link into a video player in your VR game.
 
 Windows may show a warning because the program isn't digitally signed. [`README.txt`](README.txt) has the full steps and troubleshooting.
+
+### Linux
+
+A Linux version is in the [`linux`](linux) folder. It runs from source: download this repository and run `linux/vr-video-streamer`. It needs Python 3, GTK 4 with libadwaita, GStreamer with PipeWire, PipeWire's `pw-record` and FFmpeg, which most desktops have or can install from their package manager. Like the Windows version, it downloads its other tools the first time it streams.
 
 Only stream what you have the right to share. Viewers can see everything on the screen or window you stream, including passwords and notifications, and links pass through Cloudflare. Some countries and internet providers block or slow down Cloudflare links at times, so some viewers may have trouble watching.
 

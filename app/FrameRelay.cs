@@ -115,8 +115,10 @@ public class FrameRelay
                 pubPipe.Write(frame, 0, frameBytes);
                 tick++;
                 long due = tick * 1000 / fps, now = clock.ElapsedMilliseconds;
+                // Behind (the stream stopped reading for a moment): send without sleeping until caught up. The
+                // stream counts frames to time the picture while the sound keeps real time, so skipping ahead
+                // instead would leave the picture behind the sound for the rest of the stream.
                 if (due > now) Thread.Sleep((int)(due - now));
-                else if (now - due > 1000) { clock.Restart(); tick = 0; }   // fell far behind: don't burst
             }
         }
         catch (Exception e) { if (!stopping) LastError = "Stream stopped reading: " + e.Message; }

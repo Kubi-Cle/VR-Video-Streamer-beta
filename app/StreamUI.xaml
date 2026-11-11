@@ -9,6 +9,7 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
+        <StackPanel>
         <DockPanel Margin="3,0,0,7">
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
             <TextBlock x:Name="lblVersion" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,10,0"/>
@@ -24,6 +25,17 @@
             <TextBlock x:Name="lblViewers" Style="{StaticResource MutedText}" Margin="14,0,0,0" ToolTip="Worked out from how much the stream is sending, so it's an estimate"/>
         </StackPanel>
         </DockPanel>
+        <!-- Red warning, only while this PC can't encode the stream in real time -->
+        <Border x:Name="bdrSlow" Background="{StaticResource Danger}" BorderBrush="#F09595" BorderThickness="1" CornerRadius="6" Padding="12,8" Margin="0,0,0,8" Visibility="Collapsed">
+            <DockPanel>
+                <TextBlock Style="{StaticResource Icon}" Text="&#xE7BA;" FontSize="20" Foreground="#F09595" VerticalAlignment="Top" Margin="0,1,10,0"/>
+                <StackPanel>
+                    <TextBlock x:Name="lblSlowTitle" Foreground="{StaticResource OnDanger}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="lblSlowDetail" Foreground="{StaticResource OnDanger}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+        </StackPanel>
 
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>

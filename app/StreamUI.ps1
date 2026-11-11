@@ -175,6 +175,39 @@ foreach ($pair in @(@($btnQrPublic, $tbPublic, "Video player link"), @($btnQrRem
 # --- Behaviour ---
 function Show-If($control, $visible) { $control.Visibility = if ($visible) { "Visible" } else { "Collapsed" } }
 
+# --- The red warning for a PC that can't encode the stream in real time ---
+# ffmpeg's "time=" is how much stream it has made. Compared with the real time passed (every 2 s, rather than
+# ffmpeg's "speed=", an average since the start that a slow start keeps low for minutes), it shows whether encoding
+# keeps up. When it doesn't, the picture falls behind the sound, which no syncing can fix: only lighter settings can.
+function Reset-SlowWarning {
+    $script:encLast = $null; $script:encSlow = 0; $script:encFast = 0
+    Show-If $bdrSlow $false
+}
+
+function Update-SlowWarning($streamTime) {
+    $made = [TimeSpan]::Zero
+    if (-not [TimeSpan]::TryParse($streamTime, [Globalization.CultureInfo]::InvariantCulture, [ref]$made)) { return }   # "N/A" while starting
+    $now = [Diagnostics.Stopwatch]::GetTimestamp() / [Diagnostics.Stopwatch]::Frequency
+    $last = $script:encLast
+    if (-not $last) { $script:encLast = @($made.TotalSeconds, $now); return }
+    if ($now - $last[1] -lt 2) { return }
+    $speed = ($made.TotalSeconds - $last[0]) / ($now - $last[1])
+    $script:encLast = @($made.TotalSeconds, $now)
+    if ($speed -lt 0.95) { $script:encSlow++; $script:encFast = 0 } else { $script:encFast++; $script:encSlow = 0 }
+    # Shown after ~6 s too slow, gone after ~10 s keeping up, so a brief hiccup (a game loading) doesn't flash it
+    if ($script:encSlow -ge 3) {
+        $fixes = @()
+        $gpu = if ($hasNvidia) { 1 } elseif ($hasAmd) { 2 } elseif ($hasIntel) { 3 } else { 0 }
+        if ($script:streamEncoder -eq "cpu" -and $gpu) { $fixes += "set Encoder to $($encoders[$gpu].Name)" }
+        if ($script:streamQuality -lt $qualities.Count - 1) { $fixes += "pick a lower Quality" }
+        $lblSlowTitle.Text = "Your PC can't encode the stream fast enough (only $([int]($speed * 100))% speed)"
+        $lblSlowDetail.Text = "The picture is falling behind the sound, so viewers see them out of sync. " +
+            $(if ($fixes) { "To fix it, press Stop, $($fixes -join ' or '), then Start streaming again." }
+              else { "Your settings are already as light as they go, so close other demanding programs to free up the PC." })
+        Show-If $bdrSlow $true
+    } elseif ($script:encFast -ge 5) { Show-If $bdrSlow $false }
+}
+
 # Programs silenced on this PC come back whenever no stream is running (SessionQuiet.cs)
 function Restore-QuietPrograms {
     if ($script:quietFile) { try { [SessionQuiet]::RestoreFromFile($script:quietFile) } catch { } }
@@ -1348,6 +1381,9 @@ $btnStart.Add_Click({ try {
             }
         }
         $q = $qualities[$cbQuality.SelectedIndex]
+        $script:streamQuality = $cbQuality.SelectedIndex
+        $script:streamEncoder = $encoders[$cbEncoder.SelectedIndex].Value
+        Reset-SlowWarning
         $a += @("-Height", $q.Height, "-Bitrate", $q.Bitrate, "-AudioBitrate", $audioQualities[$cbAudioQuality.SelectedIndex].Value, "-Encoder", $encoders[$cbEncoder.SelectedIndex].Value)
 
         foreach ($tb in $linkBoxes.Values) { $tb.Text = "" }
@@ -1397,6 +1433,7 @@ function Stop-Stream {
     $script:remoteLinkFor = $null
     $script:publicShown = $null
     $script:linkReconnecting = $false
+    Reset-SlowWarning
     $lblViewers.Text = ""
     Stop-Preview
 }
@@ -1805,6 +1842,7 @@ $timer.Add_Tick({ try {
         } elseif ($stats -and $stats -match 'fps=\s*([\d.]+).*time=(\S+)') {
             Show-If $pillLive $true
             $lblStat.Text = "$($Matches[1]) fps  -  running $($Matches[2])"
+            Update-SlowWarning $Matches[2]
             $script:wasLive = $true
             Update-Preview
             $script:liveTicks = [int]$script:liveTicks + 1

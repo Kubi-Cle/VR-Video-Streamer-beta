@@ -60,6 +60,7 @@ public class PipePlayer
     bool previewWanted;                // show one frame after seeking while paused
     bool playOnLoad;                   // a new file was loaded: start playing it even if paused or ended
     bool audioStopped;                 // the file's sound has stopped arriving while its picture continues
+    int audioOwed;                     // frames sent with silence because their sound was late; that sound is dropped
 
     readonly object decLock = new object();
     Process decoder; int decIndex;
@@ -168,10 +169,16 @@ public class PipePlayer
                     {
                         // Each frame is paired with its own slice of audio; wait for it rather than drift. But not
                         // every time: if a file's sound stops before its picture, this would crawl at a frame per wait.
-                        bool gotAudio = qa.TryTake(out a, audioStopped ? 0 : 3000);
+                        // Slice N belongs to frame N. When a frame had to go out silent (an online video's sound
+                        // connection stalled), its slice is thrown away when it turns up, or it would be paired with
+                        // the next frame and every sound after it would stay late for the rest of the video.
+                        int wait = audioStopped ? 0 : 3000;
+                        byte[] stale;
+                        while (audioOwed > 0 && qa.TryTake(out stale, wait)) audioOwed--;
+                        bool gotAudio = audioOwed == 0 && qa.TryTake(out a, wait);
                         if (gotAudio) audioStopped = false;
                         else if (qa.IsCompleted) { Return(v); v = null; HandleEnd(); }
-                        else audioStopped = true;
+                        else { audioStopped = true; audioOwed++; }
                         if (v != null)
                         {
                             if (previewWanted) { a = null; previewWanted = false; }
@@ -241,6 +248,7 @@ public class PipePlayer
             // Taken together, so a Load or Seek arriving after this point is picked up on the next tick
             Media m;
             lock (posLock) { m = media; segStart = pos; segFrames = 0; pendingSeek = -1; }
+            audioOwed = 0;
             decIndex++;
             string dv = name + "-d" + decIndex + "-v", da = name + "-d" + decIndex + "-a";
             decV = new NamedPipeServerStream(dv, PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.None, frameBytes * 2, 0);
