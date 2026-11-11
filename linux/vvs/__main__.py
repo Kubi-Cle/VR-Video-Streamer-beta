@@ -24,6 +24,8 @@ def main():
     p.add_argument("--fps", type=int, default=30)
     p.add_argument("--bitrate", default="4M")
     p.add_argument("--encoder", choices=["nvenc", "vaapi", "cpu"])
+    p.add_argument("--youtube-signin", metavar="BROWSER", choices=["firefox", "chrome", "chromium", "brave", "edge", "vivaldi"],
+                   help="use this browser's YouTube sign-in, if YouTube asks to confirm you're not a bot")
     p.add_argument("--sound", action="append", default=[], help="sound source key (see --list-sound); repeatable")
     p.add_argument("--list-sound", action="store_true")
     p.add_argument("--seconds", type=float, default=0, help="stop after this long (for testing)")
@@ -47,6 +49,8 @@ def main():
     settings = engine.Settings(height=a.height, fps=a.fps, bitrate=a.bitrate, loop=a.loop, public=not a.local)
     if a.encoder:
         settings.encoder = a.encoder
+    if a.youtube_signin:
+        settings.youtube_browser = a.youtube_signin
     if a.url:
         settings.source, settings.url = "url", a.url
     elif a.file:

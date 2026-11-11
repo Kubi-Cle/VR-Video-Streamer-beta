@@ -67,6 +67,38 @@ def default_encoder():
     return "nvenc" if has_nvidia() else ("vaapi" if has_vaapi() else "cpu")
 
 
+# Browsers whose YouTube sign-in yt-dlp can use, and where each keeps its profiles (Firefox moved its folder
+# to ~/.config/mozilla in newer versions, and the Flatpak keeps its own).
+BROWSERS = {
+    "firefox": ("Firefox", ["~/.config/mozilla/firefox", "~/.mozilla/firefox",
+                            "~/.var/app/org.mozilla.firefox/config/mozilla/firefox",
+                            "~/.var/app/org.mozilla.firefox/.mozilla/firefox"]),
+    "chrome": ("Google Chrome", ["~/.config/google-chrome"]),
+    "chromium": ("Chromium", ["~/.config/chromium"]),
+    "brave": ("Brave", ["~/.config/BraveSoftware/Brave-Browser"]),
+    "edge": ("Microsoft Edge", ["~/.config/microsoft-edge"]),
+    "vivaldi": ("Vivaldi", ["~/.config/vivaldi"]),
+}
+
+
+def installed_browsers():
+    """[(key, name)] of the browsers on this PC with a profile yt-dlp could take a sign-in from."""
+    return [(k, name) for k, (name, roots) in BROWSERS.items() if any(Path(r).expanduser().is_dir() for r in roots)]
+
+
+def browser_cookies_arg(key):
+    """yt-dlp's --cookies-from-browser value. Firefox is pointed at its profile folder, since yt-dlp only looks in
+    the old place by itself; the others are found by name."""
+    if key == "firefox":
+        for root in BROWSERS["firefox"][1]:
+            if Path(root).expanduser().is_dir():
+                return f"firefox:{Path(root).expanduser()}"
+    return key
+
+
+YOUTUBE_BOT_CHECK = "confirm you’re not a bot"
+
+
 @dataclass
 class Settings:
     source: str = "screen"            # screen (monitor or window, through the portal), file, url
@@ -83,7 +115,7 @@ class Settings:
     tunnel: str = "cloudflare"         # cloudflare (a free quick link) or permanent (your own Cloudflare tunnel)
     permanent_host: str = ""
     tunnel_token: str = ""
-
+    youtube_browser: str = ""          # a BROWSERS key: use that browser's YouTube sign-in; "" = don't
 
 class StreamError(Exception):
     pass
@@ -232,12 +264,25 @@ class Streamer:
         h = self.s.height
         fmt = (f"bv*[height<={h}][vcodec^=avc1]+ba[acodec^=mp4a]/bv*[height<={h}]+ba/b[height<={h}]/b")
         env = dict(os.environ, PATH=f"{tools.TOOLS_DIR}:{os.environ.get('PATH', '')}")
-        r = subprocess.run([tools.find("yt-dlp"), "--no-playlist", "--no-warnings", "-f", fmt,
+        browser = self.s.youtube_browser if self.s.youtube_browser in BROWSERS else ""
+        # Only read when you've turned it on, and only by yt-dlp on this PC: it's never saved or sent anywhere else
+        cookies = ["--cookies-from-browser", browser_cookies_arg(browser)] if browser else []
+        r = subprocess.run([tools.find("yt-dlp"), "--no-playlist", "--no-warnings", *cookies, "-f", fmt,
                             "--print", "title", "-g", self.s.url],
                            capture_output=True, text=True, timeout=120, env=env)
         lines = [l for l in r.stdout.splitlines() if l.strip()]
         if r.returncode != 0 or len(lines) < 2:
             err = (r.stderr.strip().splitlines() or ["no details"])[-1]
+            if YOUTUBE_BOT_CHECK in r.stderr.replace("'", "’"):
+                if browser:
+                    raise StreamError(f"YouTube asked this PC to prove it isn't a bot, even with {BROWSERS[browser][0]}'s "
+                                      f"sign-in. Open YouTube in {BROWSERS[browser][0]}, make sure you're signed in, "
+                                      "then try again.")
+                raise StreamError("YouTube asked this PC to prove it isn't a bot. Turn on \"Use my browser's YouTube "
+                                  "sign-in\" on the YouTube tab (you need to be signed in to YouTube in that browser), "
+                                  "or try again later.")
+            if browser and re.search(r"cookie", err, re.I):
+                raise StreamError(f"Couldn't use {BROWSERS[browser][0]}'s YouTube sign-in: {err}")
             raise StreamError(f"Couldn't open that link: {err}")
         return lines[0], lines[1:]
 

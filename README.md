@@ -29,7 +29,7 @@ Windows may show a warning because the program isn't digitally signed. [`README.
 
 ### Linux
 
-A Linux version is in the [`linux`](linux) folder. It runs from source: download this repository and run `linux/vr-video-streamer`. It needs Python 3, GTK 4 with libadwaita, GStreamer with PipeWire, PipeWire's `pw-record` and FFmpeg, which most desktops have or can install from their package manager. Like the Windows version, it downloads its other tools the first time it streams.
+A Linux version is in the [`linux`](linux) folder. It runs from source: download this repository and run `linux/vr-video-streamer`. It needs Python 3, GTK 4 with libadwaita, GStreamer with PipeWire and its GTK 4 plugin (for the preview), PipeWire's `pw-record` and FFmpeg, which most desktops have or can install from their package manager. If YouTube asks to confirm you're not a bot, turn on **Use my browser's YouTube sign-in** on the YouTube tab. Like the Windows version, it downloads its other tools the first time it streams.
 
 Only stream what you have the right to share. Viewers can see everything on the screen or window you stream, including passwords and notifications, and links pass through Cloudflare. Some countries and internet providers block or slow down Cloudflare links at times, so some viewers may have trouble watching.
 

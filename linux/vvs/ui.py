@@ -11,7 +11,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gst", "1.0")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Gst, Gtk  # noqa: E402
 
 from . import VERSION, audio, engine, portal, qr, tools  # noqa: E402
 
@@ -207,6 +207,18 @@ class Window(Adw.ApplicationWindow):
         paste.connect("clicked", lambda *_: self.paste_url())
         self.url_row.add_suffix(paste)
         group.add(self.url_row)
+        # YouTube sometimes demands a sign-in ("confirm you're not a bot"); a browser's sign-in gets past that.
+        # Off unless chosen, and only browsers found on this PC are offered.
+        browsers = engine.installed_browsers()
+        self.yt_browser_keys = [""] + [k for k, _ in browsers]
+        self.yt_signin = Adw.ComboRow(
+            title="Use my browser's YouTube sign-in",
+            subtitle="Turn on if YouTube asks to confirm you're not a bot. You need to be signed in to YouTube in "
+                     "that browser. It's read on this PC only, never saved or sent anywhere else.",
+            model=Gtk.StringList.new(["Off"] + [name for _, name in browsers]), visible=bool(browsers))
+        saved = self.cfg.get("youtube_browser", "")
+        self.yt_signin.set_selected(self.yt_browser_keys.index(saved) if saved in self.yt_browser_keys else 0)
+        group.add(self.yt_signin)
         url_page.append(group)
         self.source_stack.add_titled_with_icon(url_page, "url", "YouTube", "web-browser-symbolic")
         self.source_stack.set_visible_child_name(self.cfg.get("source", "screen"))
@@ -232,6 +244,10 @@ class Window(Adw.ApplicationWindow):
         holder.set_size_request(-1, 260)
         self.video = Gtk.Video(autoplay=True, loop=False, hexpand=True, visible=False)
         holder.append(self.video)
+        # The preview proper: GStreamer plays the stream's address into this picture (see start_preview)
+        self.picture = Gtk.Picture(hexpand=True, visible=False, content_fit=Gtk.ContentFit.CONTAIN)
+        holder.append(self.picture)
+        self.preview_player = None
         frame.set_child(holder)
         self.preview_hint = Gtk.Label(label="A preview of what viewers see appears here", wrap=True,
                                       justify=Gtk.Justification.CENTER)
@@ -428,13 +444,14 @@ class Window(Adw.ApplicationWindow):
         s.permanent_host = self.perm_host.get_text().strip()
         s.tunnel_token = self.perm_token.get_text().strip()
         s.sounds = self.chosen_sounds()
+        s.youtube_browser = self.yt_browser_keys[self.yt_signin.get_selected()]
         return s
 
     def remember(self, s):
         self.cfg.update({
             "source": s.source, "file": s.file, "url": s.url, "loop": s.loop, "height": s.height, "fps": s.fps,
             "bitrate": s.bitrate, "encoder": s.encoder, "public": s.public, "tunnel": s.tunnel,
-            "permanent_host": s.permanent_host, "tunnel_token": s.tunnel_token,
+            "permanent_host": s.permanent_host, "tunnel_token": s.tunnel_token, "youtube_browser": s.youtube_browser,
             "sounds": [x.to_json() for x in s.sounds], "preview": self.preview_switch.get_active(),
         })
         save_settings(self.cfg)
@@ -584,26 +601,63 @@ class Window(Adw.ApplicationWindow):
         want = bool(self.streamer and self.live_pill.get_visible() and self.preview_switch.get_active())
         if self.streamer:
             self.streamer.preview_on = want
-        current = self.video.get_media_stream()
-        if want and current is None:
-            media = Gtk.MediaFile.new_for_file(Gio.File.new_for_uri(LOCAL_HLS))
-            media.set_muted(True)   # it would be heard again by "Everything you hear on this PC"
-            media.connect("notify::error", self.on_preview_error)
-            self.video.set_media_stream(media)
-            self.video.set_visible(True)
-            media.play()
+        running = self.preview_player is not None or self.video.get_media_stream() is not None
+        if want and not running:
+            self.start_preview()
             self.preview_hint.set_visible(False)
-        elif not want and current is not None:
-            current.pause()
-            self.video.set_media_stream(None)
-            self.video.set_visible(False)
+        elif not want and running:
+            self.stop_preview()
             self.preview_hint.set_visible(True)
             self.preview_hint.set_label("Preview is off" if self.streamer else
                                         "A preview of what viewers see appears here")
 
-    def on_preview_error(self, media, _pspec):
-        if media.get_error() and self.video.get_media_stream() is media:
+    def start_preview(self):
+        """GStreamer fetches the stream's address itself. (GTK's own player opens an address as a file, so the
+        stream's playlist loses its address and every refresh of it printed GLib warnings.) Sound goes nowhere:
+        it would be heard again by "Everything you hear on this PC"."""
+        Gst.init(None)
+        sink = Gst.ElementFactory.make("gtk4paintablesink", None)
+        player = Gst.ElementFactory.make("playbin", None)
+        if sink is None or player is None:   # GStreamer's GTK 4 plugin isn't installed: GTK's own player
+            media = Gtk.MediaFile.new_for_file(Gio.File.new_for_uri(LOCAL_HLS))
+            media.set_muted(True)
+            media.connect("notify::error", self.on_preview_error)
+            self.video.set_media_stream(media)
+            self.video.set_visible(True)
+            media.play()
+            return
+        silent = Gst.ElementFactory.make("fakesink", None)
+        silent.set_property("sync", True)
+        player.set_property("uri", LOCAL_HLS)
+        player.set_property("video-sink", sink)
+        player.set_property("audio-sink", silent)
+        self.picture.set_paintable(sink.get_property("paintable"))
+        bus = player.get_bus()
+        bus.add_signal_watch()
+        bus.connect("message::error", lambda *_: self.on_preview_error(None, None))
+        bus.connect("message::eos", lambda *_: self.on_preview_error(None, None))
+        self.preview_player = player
+        self.picture.set_visible(True)
+        player.set_state(Gst.State.PLAYING)
+
+    def stop_preview(self):
+        player, self.preview_player = self.preview_player, None
+        if player is not None:
+            player.get_bus().remove_signal_watch()
+            player.set_state(Gst.State.NULL)
+        self.picture.set_paintable(None)
+        self.picture.set_visible(False)
+        current = self.video.get_media_stream()
+        if current is not None:
+            current.pause()
             self.video.set_media_stream(None)
+        self.video.set_visible(False)
+
+    def on_preview_error(self, media, _pspec):
+        """The preview failed or its stream ended (media is None for the GStreamer player): try again shortly."""
+        gtk_failed = media is not None and media.get_error() and self.video.get_media_stream() is media
+        if gtk_failed or (media is None and self.preview_player is not None):
+            self.stop_preview()
             if self._preview_retry is None:
                 def retry():
                     self._preview_retry = None
