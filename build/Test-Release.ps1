@@ -4,7 +4,7 @@
   script and C# file is accepted by this PC's Windows PowerShell, and each way of streaming really works, measured
   from the stream viewers would get. Nothing goes on the internet: the test streams stay on this PC.
 
-  powershell -ExecutionPolicy Bypass -File build\Test-Release.ps1 -Zip release\VR-Video-Streamer-1.2.5.zip
+  powershell -ExecutionPolicy Bypass -File build\Test-Release.ps1 -Zip release\VR-Video-Streamer-1.2.6.zip
   powershell -ExecutionPolicy Bypass -File build\Test-Release.ps1 -Latest      (downloads the newest release from GitHub)
 
   Close VR Video Streamer first. Takes about 5-10 minutes; a test window with a moving pattern opens for a while.
@@ -117,7 +117,9 @@ if ($Quick) { $encoders = @($encoders[-1]) }
 # Test video: one white frame and a short beep at exactly the same moment every 2 s, so sync can be measured
 $syncFile = Join-Path $work "sync.mp4"
 $ErrorActionPreference = "Continue"
-& $ffmpeg -v error -y -f lavfi -i "color=black:s=1920x1080:r=60:d=180,drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:enable='lt(mod(t\,2)\,1/60)',drawbox=x='mod(t*400\,iw-100)':y=500:w=100:h=100:color=red:t=fill" `
+# The moving square is an overlay: drawbox works out its position only once, so a drawbox square never moves and
+# every stream would look like it repeats frames
+& $ffmpeg -v error -y -f lavfi -i "color=black:s=1920x1080:r=60:d=180[bg];color=red:s=100x100:r=60:d=180[box];[bg][box]overlay=x='mod(t*400\,W-100)':y=500:eval=frame,drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:enable='lt(mod(t\,2)\,1/60)'" `
     -f lavfi -i "sine=f=1000:r=48000:d=180,volume='if(lt(mod(t\,2)\,0.05)\,1\,0)':eval=frame" -c:v libx264 -preset veryfast -g 60 -c:a aac -b:a 192k $syncFile 2>&1 | Out-Null
 $ErrorActionPreference = "Stop"
 

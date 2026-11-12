@@ -499,7 +499,9 @@ function Show-NewLinkAlert($why) {
     try { [System.Media.SystemSounds]::Exclamation.Play() } catch { }
 }
 
-function Quote($s) { '"' + ($s -replace '"', '\"') + '"' }
+# One argument for a Windows program's command line, whatever it holds: backslashes only count as escapes right
+# before a quote, so those (and any at the very end, before the closing quote) are doubled
+function Quote($s) { '"' + ("$s" -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"' }
 
 # What's in the file, or nothing (with a message) if ffmpeg can't play it
 function Get-MediaInfo($path) {
@@ -1356,6 +1358,9 @@ $btnStart.Add_Click({ try {
                     Update-Enabled
                     $lblStatus.Text = "Getting the video..."
                     $script:startUrl = $source
+                    # A restart after a failure (Start-Recovery) has to stay one when the second Start comes, or the
+                    # alert about the new link and the remote's address are lost
+                    $script:startWasRecovery = [bool]$script:recovering
                     Get-YouTubeStream $source $height {
                         param($info, $why)
                         $script:startingYouTube = $false
@@ -1364,7 +1369,9 @@ $btnStart.Add_Click({ try {
                         $found.Url = $script:startUrl
                         $script:startStream = $found
                         Update-Enabled
-                        $btnStart.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))
+                        $script:recovering = $script:startWasRecovery
+                        try { $btnStart.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent))) }
+                        finally { $script:recovering = $false; $script:startWasRecovery = $false }
                     }
                     return
                 }

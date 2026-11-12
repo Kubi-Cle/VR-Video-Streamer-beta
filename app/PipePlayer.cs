@@ -102,6 +102,8 @@ public class PipePlayer
             if (media.Duration > 0) seconds = Math.Min(seconds, Math.Max(0, media.Duration - 0.25));
             pendingSeek = Math.Max(0, seconds);
         }
+        // Jumping somewhere after the end (clicking the bar) plays from there, as the window says it will
+        if (ended) paused = false;
         ended = false;
     }
 
@@ -163,6 +165,8 @@ public class PipePlayer
 
                 byte[] v = null, a = null;
                 var q = vq; var qa = aq;
+                bool online;
+                lock (posLock) online = media.File != null && media.File.StartsWith("http", StringComparison.OrdinalIgnoreCase);
                 if ((!paused || previewWanted) && q != null)
                 {
                     if (q.TryTake(out v))
@@ -172,7 +176,9 @@ public class PipePlayer
                         // Slice N belongs to frame N. When a frame had to go out silent (an online video's sound
                         // connection stalled), its slice is thrown away when it turns up, or it would be paired with
                         // the next frame and every sound after it would stay late for the rest of the video.
-                        int wait = audioStopped ? 0 : 3000;
+                        // An online video's sound can stall for a while and catch up; a file's sound doesn't, so
+                        // waiting long there only freezes the picture when its sound track ends before its picture
+                        int wait = audioStopped ? 0 : (online ? 3000 : 400);
                         byte[] stale;
                         while (audioOwed > 0 && qa.TryTake(out stale, wait)) audioOwed--;
                         bool gotAudio = audioOwed == 0 && qa.TryTake(out a, wait);
@@ -235,7 +241,11 @@ public class PipePlayer
 
     void HandleEnd()
     {
-        if (Loop) { Seek(0); return; }
+        // A file that never gave a single frame (broken, missing, an expired link) isn't looped, or its
+        // decoder would be started again and again many times a second
+        bool playedSome;
+        lock (posLock) playedSome = segFrames > 0 || segStart > 0;
+        if (Loop && playedSome) { Seek(0); return; }
         KillDecoder();
         ended = true; paused = true;
     }
@@ -286,6 +296,17 @@ public class PipePlayer
             if (subsFolder != null) psi.WorkingDirectory = subsFolder;
             var p = new Process { StartInfo = psi };
             p.ErrorDataReceived += (s, e) => { if (!string.IsNullOrWhiteSpace(e.Data)) LastError = e.Data; };
+            // A decoder that stops before opening its pipes (a broken or missing file, a link that's refused) would
+            // leave the readers waiting for it forever, so the file never ended and the queue never moved on.
+            // Connecting to a pipe nobody opened lets its reader see the end. One that's in use refuses this.
+            p.EnableRaisingEvents = true;
+            p.Exited += (s, e) =>
+            {
+                foreach (string pipe in new[] { dv, da })
+                {
+                    try { using (var c = new NamedPipeClientStream(".", pipe, PipeDirection.Out)) c.Connect(50); } catch { }
+                }
+            };
             p.Start();
             p.BeginErrorReadLine();
             decoder = p;

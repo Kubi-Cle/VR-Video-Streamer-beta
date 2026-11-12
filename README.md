@@ -20,7 +20,7 @@ Stream your desktop monitor, application windows, local video files, music files
 
 Needs Windows 10 (version 2004 or newer) or Windows 11, 64-bit.
 
-1. Download `VR-Video-Streamer-1.2.5.zip` from the link above and extract it.
+1. Download `VR-Video-Streamer-1.2.6.zip` from the link above and extract it.
 2. Open `VR Video Streamer.exe`. It offers to download FFmpeg, the video tool it needs, on first run.
 3. Select the video and sound you'd like to stream.
 4. Press **Start streaming** and paste the Video Player Link into a video player in your VR game.
