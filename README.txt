@@ -1,4 +1,4 @@
-VR Video Streamer, Version 1.2.2
+VR Video Streamer, Version 1.2.3
 Stream your desktop, application windows, local video files and online videos to VR video players.
 Needs Windows 10 (version 2004 or newer) or Windows 11, 64-bit.
 
@@ -23,8 +23,9 @@ Other links:
 - Remote control: a web page for pausing, skipping, jumping and adding YouTube links from a phone. Only give it to
   people you trust. It stops working when you press Stop.
 - QR: shows a link as a code a phone camera can open.
-If the Video Player Link's connection drops, it reconnects by itself without stopping the stream. A free link's
-address changes when that happens, and the window shows the new one.
+If the Video Player Link's connection drops, it reconnects by itself without stopping the stream, and keeps the
+same address whenever it can. If a free link does come back at a new address, a Windows notification and a sound
+tell you, and the new link is copied for you. A permanent link (Permanent link button) never changes address.
 
 Subtitles menu: "Translate these" puts the subtitles showing into your language, using Google Translate (it sends the
 subtitle text to Google). The window remembers your choices for next time, and tells you when there's a newer version.

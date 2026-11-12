@@ -521,10 +521,10 @@ class Streamer:
         env = dict(os.environ)
         if s.tunnel == "permanent":
             env["TUNNEL_TOKEN"] = s.tunnel_token
-            args = [tools.find("cloudflared"), "tunnel", "--no-autoupdate", "run"]
+            args = [tools.find("cloudflared"), "tunnel", "--no-autoupdate", "--retries", "8", "run"]
             fixed = "https://" + s.permanent_host.strip().removeprefix("https://").strip("/")
         else:
-            args = [tools.find("cloudflared"), "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{HLS_PORT}"]
+            args = [tools.find("cloudflared"), "tunnel", "--no-autoupdate", "--retries", "8", "--url", f"http://127.0.0.1:{HLS_PORT}"]
             fixed = None
         proc = self._spawn(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, env=env)
         self.tunnel_proc = proc

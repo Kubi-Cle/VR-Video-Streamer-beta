@@ -470,6 +470,7 @@ class Window(Adw.ApplicationWindow):
         self.start_btn.set_visible(False)
         self.stop_btn.set_visible(True)
         self.set_status("Starting...")
+        self.first_link = None   # this stream's first link, so a later different one can be announced
         self.streamer = engine.Streamer(s, self.screencast, lambda k, v: GLib.idle_add(self.on_event, k, v))
         self.streamer.preview_on = self.preview_switch.get_active()
         self.streamer.start()
@@ -491,6 +492,11 @@ class Window(Adw.ApplicationWindow):
             self.set_status(value)
         elif kind == "link":
             self.set_link(value)
+            if value:
+                previous = getattr(self, "first_link", None)
+                if previous and value != previous:
+                    self.alert_new_link()
+                self.first_link = value
         elif kind == "live":
             self.live_pill.set_visible(bool(value))
             self.update_preview()
@@ -700,6 +706,25 @@ class Window(Adw.ApplicationWindow):
 
     def toast(self, text):
         self.toasts.add_toast(Adw.Toast(title=GLib.markup_escape_text(text), timeout=4))
+
+    def alert_new_link(self):
+        """The link service dropped and a free link came back at a new address, so viewers were cut off. The person
+        is often in VR or another program, so besides the window's message this sends a desktop notification and
+        beeps. A permanent link comes back the same, so it never gets here."""
+        text = "The link service dropped and reconnected at a new address. Viewers need the new Video Player Link (copied)."
+        self.set_status(text)
+        self.toasts.add_toast(Adw.Toast(title=GLib.markup_escape_text(text), timeout=15))
+        try:
+            note = Gio.Notification.new("New Video Player Link")
+            note.set_body(text)
+            note.set_priority(Gio.NotificationPriority.HIGH)
+            self.get_application().send_notification("new-link", note)
+        except Exception:
+            pass
+        try:
+            self.get_display().beep()
+        except Exception:
+            pass
 
     def on_close(self, *_):
         if self.streamer:

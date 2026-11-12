@@ -31,6 +31,14 @@ Add-Type -Name Win -Namespace UI -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
 [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+[StructLayout(LayoutKind.Sequential)] public struct FLASHWINFO { public uint cbSize; public IntPtr hwnd; public uint dwFlags; public uint uCount; public uint dwTimeout; }
+[DllImport("user32.dll")] public static extern bool FlashWindowEx(ref FLASHWINFO info);
+// Flashes the taskbar button until the window is next brought to the front
+public static void Flash(IntPtr h) {
+    var f = new FLASHWINFO { hwnd = h, dwFlags = 3 | 12 };   // caption and taskbar, until in front
+    f.cbSize = (uint)Marshal.SizeOf(f);
+    FlashWindowEx(ref f);
+}
 '@
 # Only the window should be visible, not the PowerShell console behind it
 [void][UI.Win]::ShowWindow([UI.Win]::GetConsoleWindow(), 0)
@@ -454,6 +462,30 @@ $window.Add_PreviewDrop({ param($s, $e)
 $window.Add_ContentRendered({ [void][UI.Win]::SetForegroundWindow((New-Object System.Windows.Interop.WindowInteropHelper($window)).Handle) })
 # A message window rather than the status line, which the timer rewrites twice a second while streaming
 function Show-Notice($text) { [void](Show-Message $window $text) }
+
+# Viewers were cut off and need the new video player link. The person is often in VR or in another program, so a
+# line in the window isn't enough: this also shows a Windows notification, flashes the taskbar button and plays a
+# sound. None of it waits for an answer, so the stream carries on.
+function Show-NewLinkAlert($why) {
+    $copied = if ($script:linkCopied) { " It's copied to the clipboard." } else { " Press Copy next to it in the window." }
+    $text = "$why Viewers need the new video player link.$copied"
+    try {
+        Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+        if (-not $script:trayIcon) {
+            $script:trayIcon = New-Object System.Windows.Forms.NotifyIcon
+            $ico = Join-Path $PSScriptRoot "app.ico"
+            $script:trayIcon.Icon = if (Test-Path -LiteralPath $ico) { New-Object System.Drawing.Icon $ico } else { [System.Drawing.SystemIcons]::Warning }
+            $script:trayIcon.Text = $Title
+            # Clicking the notification brings the window back, with the new link in it
+            $script:trayIcon.Add_BalloonTipClicked({ $window.WindowState = "Normal"; [void]$window.Activate() })
+            $script:trayIcon.Add_MouseClick({ $window.WindowState = "Normal"; [void]$window.Activate() })
+        }
+        $script:trayIcon.Visible = $true
+        $script:trayIcon.ShowBalloonTip(15000, "New video player link", $text, [System.Windows.Forms.ToolTipIcon]::Warning)
+    } catch { }
+    try { [UI.Win]::Flash((New-Object System.Windows.Interop.WindowInteropHelper($window)).Handle) } catch { }
+    try { [System.Media.SystemSounds]::Exclamation.Play() } catch { }
+}
 
 function Quote($s) { '"' + ($s -replace '"', '\"') + '"' }
 
@@ -1349,7 +1381,8 @@ $btnStart.Add_Click({ try {
         $a += @("-SubtitleText", (Quote $subtitleTextFile), "-SubtitleSize", $script:settings.SubsSize, "-SubtitlePlace", $script:settings.SubsPlace,
                 "-SubtitleColor", $script:settings.SubsColor, "-SubtitleFont", (Quote (Get-SubtitleFontPath $script:settings)))
         $script:wasLive = $false
-        $script:publicFails = 0
+        $script:publicFails = 0; $script:linkStalled = $false
+        if (-not $script:recovering) { $script:linkBeforeRestart = $null }   # started by hand: viewers expect a new link
         $script:viewerSamples = New-Object Collections.ArrayList
         $lblViewers.Text = ""
         $script:soundPids = @()
@@ -1449,6 +1482,9 @@ function Start-Recovery($why) {
     $pl = $script:player
     $script:resumeAt = if ($pl -and $pl.Duration -gt 0 -and -not $pl.Ended) { [Math]::Max(0, $pl.Position - 2) } else { 0 }
     $hadPublic = [bool]$linkBoxes.public.Text
+    # So the alert can tell, once the link reopens, whether viewers' link changed
+    $script:linkBeforeRestart = $linkBoxes.public.Text
+    $script:restartWhy = "$why It restarted by itself, and the free link came back at a new address."
     $script:recovering = $true
     try {
         Stop-Stream
@@ -1475,7 +1511,25 @@ function Test-PublicLink {
         $script:linkCheckBusy = $false
         if (-not $script:proc) { return }
         $script:publicFails = if ($status -eq 200) { 0 } else { [int]$script:publicFails + 1 }
-        if ($script:publicFails -ge 4) { $script:publicFails = 0; [void](Start-Recovery "The video player link stopped working.") }
+        if ($script:publicFails -eq 0) { $script:linkStalled = $false; return }
+        # Cloudflare's own hiccups, or this PC being too busy to answer the check in time, usually pass within a minute
+        # or two, and cloudflared reconnects by itself at the same address. Restarting would hand a free link a new
+        # address and stop every viewer, so the link is left alone while cloudflared is still running.
+        $tunnelRunning = @(Get-Process cloudflared -ErrorAction SilentlyContinue |
+                Where-Object { $_.Path -and $_.Path.StartsWith($toolsFolder, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+        if ($script:publicFails -ge 4) { $script:linkStalled = $true }
+        if ($script:publicVia -eq "Your permanent link" -and $script:publicFails -ge 4 -and $tunnelRunning) {
+            # A permanent link keeps its address, so reconnecting just the link program costs viewers nothing.
+            # The stream script's watchdog opens it again.
+            $script:publicFails = 0
+            Get-Process cloudflared -ErrorAction SilentlyContinue |
+                Where-Object { $_.Path -and $_.Path.StartsWith($toolsFolder, [StringComparison]::OrdinalIgnoreCase) } |
+                Stop-Process -Force -ErrorAction SilentlyContinue
+        } elseif ($script:publicFails -ge 20 -or ($script:publicFails -ge 4 -and -not $tunnelRunning)) {
+            # Down for about 5 minutes, or the link program has gone: a new link is better than none
+            $script:publicFails = 0; $script:linkStalled = $false
+            [void](Start-Recovery "The video player link stopped working.")
+        }
     }
 }
 
@@ -1742,7 +1796,7 @@ $btnAudio.Add_Click({
         $menu.IsOpen = $true
     })
 $btnStop.Add_Click({ Stop-Stream })
-$window.Add_Closing({ Stop-Stream; Restore-QuietPrograms })
+$window.Add_Closing({ Stop-Stream; Restore-QuietPrograms; if ($script:trayIcon) { $script:trayIcon.Dispose() } })
 
 function Read-Shared($path, $tailBytes = 0) {
     if (-not (Test-Path $path)) { return "" }
@@ -1783,8 +1837,14 @@ $timer.Add_Tick({ try {
             if ($changed) {
                 $script:recoverNotice = "The link service dropped and reconnected by itself, so viewers need the new video player link$(if ($script:linkCopied) { ' (copied)' })."
                 $script:recoverNoticeAt = Get-Date
-                $script:publicFails = 0
+                $script:publicFails = 0; $script:linkStalled = $false
+                Show-NewLinkAlert "The link service dropped and reconnected at a new address."
+            } elseif ($script:linkBeforeRestart -and $script:linkBeforeRestart -ne $script:publicShown) {
+                # The stream restarted by itself (Start-Recovery) and a free link came back at a new address.
+                # A permanent link comes back the same, so viewers keep watching and there's nothing to say.
+                Show-NewLinkAlert $script:restartWhy
             }
+            $script:linkBeforeRestart = $null
         }
         $lastDrop = $out.LastIndexOf("The public link service disconnected")
         $script:linkReconnecting = $lastDrop -ge 0 -and (-not $newest -or $lastDrop -gt $newest.Index)
@@ -1863,6 +1923,7 @@ $timer.Add_Tick({ try {
             if ($script:subsNotice) { $lines += $script:subsNotice }
             if ($pl -and $script:slowTicks -gt 0) { $lines += "The video is arriving more slowly than it plays, so viewers will see stutters." }
             if ($script:linkReconnecting) { $lines += "The video player link dropped. Reconnecting by itself... The stream keeps going, and viewers get the new link." }
+            elseif ($script:linkStalled -and $linkBoxes.public.Text) { $lines += "The video player link isn't answering just now. It usually comes back by itself at the same address, so viewers can keep the link they have." }
             elseif ($publicFailed) { $lines += "The video player link failed, so nobody can watch. Press Stop, wait a minute, and Start again." }
             elseif ($linkBoxes.public.Text) { $lines += "Video player link (via $($script:publicVia))$(if ($script:linkCopied) { ' copied to clipboard' } else { ' ready: press Copy next to it' }). Anyone with it can watch until you press Stop." }
             if ($soundGone) { $lines += "A program you picked for sound has closed, so viewers no longer hear it. Press Refresh list and tick another." }

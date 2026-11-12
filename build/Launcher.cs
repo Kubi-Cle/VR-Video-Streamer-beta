@@ -10,8 +10,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("VR Video Streamer")]
 [assembly: AssemblyProduct("VR Video Streamer")]
 [assembly: AssemblyDescription("Streams your screen or videos to VR video players")]
-[assembly: AssemblyVersion("1.2.2.0")]        // the program's version: Make-Release.ps1 reads it from here
-[assembly: AssemblyFileVersion("1.2.2.0")]
+[assembly: AssemblyVersion("1.2.3.0")]        // the program's version: Make-Release.ps1 reads it from here
+[assembly: AssemblyFileVersion("1.2.3.0")]
 
 static class Launcher
 {

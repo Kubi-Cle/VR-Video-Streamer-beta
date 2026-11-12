@@ -399,13 +399,17 @@ try {
     if ($Public) {
         # Cloudflare only: a free quick link (a random https address per run, no account), or your own permanent one
         $target = "127.0.0.1:$TunnelPort"
+        # cloudflared reconnects by itself when its connection to Cloudflare drops, keeping the same address, but by
+        # default it gives up and closes after 5 tries (about 30 s). A free link then comes back at a new address and
+        # every viewer is cut off, so it keeps trying for about 4 minutes instead.
+        $keepTrying = "--retries 8"
         $providers = @(
             @{ Id = "cloudflare"; Name = "Cloudflare"; Exe = $CloudflaredExe; Tries = 3; Pattern = 'https://[a-z0-9-]+\.trycloudflare\.com'
-               Connected = 'Registered tunnel connection'; Args = "tunnel --no-autoupdate --url http://$target" },
+               Connected = 'Registered tunnel connection'; Args = "tunnel --no-autoupdate $keepTrying --url http://$target" },
             # Your own Cloudflare tunnel: the address never changes, so it isn't read from a log.
             # Only when asked for by name, since it needs setting up. cloudflared reads the token from TUNNEL_TOKEN.
             @{ Id = "permanent"; Name = "Your permanent link"; Exe = $CloudflaredExe; Tries = 2; Fixed = "https://$PermanentHost"
-               Connected = 'Registered tunnel connection'; Args = "tunnel --no-autoupdate run" }
+               Connected = 'Registered tunnel connection'; Args = "tunnel --no-autoupdate $keepTrying run" }
         ) | Where-Object { ($Tunnel -eq "auto" -and $_.Id -eq "cloudflare") -or $_.Id -eq $Tunnel }
         # Opens a link with the first service that works, as @{ Url; Via }. The watchdog below runs this too, on its
         # own thread, so it takes everything as arguments and writes straight to the output the window reads.
