@@ -12,9 +12,6 @@ $StreamScript = Join-Path $PSScriptRoot "Start-DesktopStream.ps1"
 $OutLog = Join-Path $env:TEMP "VRVideoStreamer-out-$PID.txt"
 $ErrLog = Join-Path $env:TEMP "VRVideoStreamer-err-$PID.txt"
 $Title = "VR Video Streamer"
-# Earlier windows' leftovers (skips any still in use)
-Get-ChildItem $env:TEMP -Filter "VRVideoStreamer-*" -File -ErrorAction SilentlyContinue |
-    Where-Object { $_.Extension -in ".txt", ".log", ".jpg", ".tmp" } | ForEach-Object { try { Remove-Item $_.FullName -Force -ErrorAction Stop } catch { } }
 
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Xaml
 # This window is launched hidden, so anything that stops it opening has to be shown or nobody would see it.
@@ -57,6 +54,14 @@ if (-not $owned) {
     }
     exit
 }
+
+# Earlier windows' leftovers. Only once this copy is the one that runs (opening the program again while it's
+# open used to delete the running window's subtitle file first, so its next stream couldn't start), and never
+# a file whose program is still running: the subtitle and sound files aren't held open between writes.
+Get-ChildItem $env:TEMP -Filter "VRVideoStreamer-*" -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -in ".txt", ".log", ".jpg", ".tmp" } |
+    Where-Object { -not ($_.BaseName -match '-(\d+)(-\d+)?$' -and [int]$Matches[1] -ne $PID -and (Get-Process -Id ([int]$Matches[1]) -ErrorAction SilentlyContinue)) } |
+    ForEach-Object { try { Remove-Item $_.FullName -Force -ErrorAction Stop } catch { } }
 
 # Closing this window (X, Task Manager, crash) takes down everything it started: the stream script
 # and its ffmpeg / MediaMTX / cloudflared, and the video file decoder

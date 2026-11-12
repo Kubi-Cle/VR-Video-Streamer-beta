@@ -1,4 +1,4 @@
-VR Video Streamer, Version 1.2.4
+VR Video Streamer, Version 1.2.5
 Stream your desktop, application windows, local video files and online videos to VR video players.
 Needs Windows 10 (version 2004 or newer) or Windows 11, 64-bit.
 

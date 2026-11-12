@@ -355,12 +355,20 @@ $video = switch ($Encoder) {
 # Shrink to $Height if bigger, never upscale; keep both sides even for H.264
 $videoFilter = "scale=-2:'min($Height,trunc(ih/2)*2)'"
 $subtitleFont = if ($SubtitleFont -and (Test-Path -LiteralPath $SubtitleFont)) { $SubtitleFont } else { Join-Path $env:WINDIR "Fonts\arial.ttf" }
-if ($SubtitleText -and (Test-Path -LiteralPath $subtitleFont)) {
-    # Subtitles are drawn after scaling so they're the same size at any quality. The text file is named
-    # relative to its folder, since a user name with an apostrophe would break a full path in a filter.
-    Set-Location -LiteralPath (Split-Path $SubtitleText)
-    $fontForFilter = ($subtitleFont -replace '\\', '/') -replace ':', '\:'
-    $videoFilter += ",drawtext=textfile=$(Split-Path $SubtitleText -Leaf):reload=1:expansion=none:fontfile='$fontForFilter'" +
+# A file path as a filter option's value. It's escaped twice, once for the option and once for the filter graph,
+# so a drive's colon, an apostrophe in a user name, a comma or a bracket can't break the filter.
+function ConvertTo-FilterPath([string]$path) {
+    $s = ($path -replace '\\', '/').Replace("'", "\'").Replace(':', '\:')
+    $s.Replace('\', '\\').Replace("'", "\'").Replace('[', '\[').Replace(']', '\]').Replace(',', '\,').Replace(';', '\;')
+}
+if ($SubtitleText -and -not (Test-Path -LiteralPath $SubtitleText)) {
+    # The window writes this file when it opens; if it's gone (something cleared the Temp folder), a blank one
+    # stands in, or ffmpeg can't start. Blank = NULs, where drawtext stops reading: an empty file is refused.
+    try { [IO.File]::WriteAllBytes($SubtitleText, (New-Object byte[] 1024)) } catch { }
+}
+if ($SubtitleText -and (Test-Path -LiteralPath $SubtitleText) -and (Test-Path -LiteralPath $subtitleFont)) {
+    # Subtitles are drawn after scaling so they're the same size at any quality
+    $videoFilter += ",drawtext=textfile=$(ConvertTo-FilterPath $SubtitleText):reload=1:expansion=none:fontfile=$(ConvertTo-FilterPath $subtitleFont)" +
         ":fontsize=h/${SubtitleSize}:fontcolor=${SubtitleColor}:borderw=2:bordercolor=black:line_spacing=6:text_align=C" +
         ":x=(w-text_w)/2:y=$(if ($SubtitlePlace -eq 'top') { 'h/14' } else { 'h-text_h-h/14' }):fix_bounds=1"
 }

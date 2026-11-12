@@ -33,6 +33,7 @@ public class SubtitleOverlay
     readonly Stopwatch clock = new Stopwatch();
     double clockBase;
     string written;
+    int checks;
     volatile bool stopping;
 
     public volatile PipePlayer Player;   // null = use the plain clock
@@ -111,7 +112,9 @@ public class SubtitleOverlay
             try
             {
                 string text = CurrentText();
-                if (text != written) WriteText(text);   // a failed write tries again next time round
+                // A failed write tries again next time round; a file something deleted is written again, since
+                // the stream's ffmpeg rereads it and can't carry on without it
+                if (text != written || ++checks % 25 == 0 && !File.Exists(textFile)) WriteText(text);
             }
             catch (Exception) { }                       // an error on this thread would close the whole program
             Thread.Sleep(40);
