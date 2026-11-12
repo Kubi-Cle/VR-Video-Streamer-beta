@@ -63,8 +63,37 @@ def has_vaapi():
     return Path("/dev/dri/renderD128").exists()
 
 
+_working = None
+
+
+def working_encoders():
+    """The encoders that really work on this PC, best first, found by encoding a few frames with each (once per run).
+    A graphics card being present isn't enough: VA-API needs a working driver, NVENC a recent NVIDIA driver."""
+    global _working
+    if _working is None:
+        tests = {"nvenc": ["-c:v", "h264_nvenc"],
+                 "vaapi": ["-vaapi_device", "/dev/dri/renderD128", "-vf", "format=nv12,hwupload", "-c:v", "h264_vaapi"]}
+        found = []
+        for name, args in tests.items():
+            if name == "nvenc" and not has_nvidia() or name == "vaapi" and not has_vaapi():
+                continue
+            if name == "vaapi":   # the device comes before the input
+                cmd = ["ffmpeg", "-hide_banner", "-loglevel", "quiet", "-nostdin", *args[:2], "-f", "lavfi",
+                       "-i", "color=black:s=1280x720:r=30", "-frames:v", "5", *args[2:], "-f", "null", "-"]
+            else:
+                cmd = ["ffmpeg", "-hide_banner", "-loglevel", "quiet", "-nostdin", "-f", "lavfi",
+                       "-i", "color=black:s=1280x720:r=30", "-frames:v", "5", *args, "-f", "null", "-"]
+            try:
+                if subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20).returncode == 0:
+                    found.append(name)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        _working = found + ["cpu"]
+    return _working
+
+
 def default_encoder():
-    return "nvenc" if has_nvidia() else ("vaapi" if has_vaapi() else "cpu")
+    return working_encoders()[0]
 
 
 # Browsers whose YouTube sign-in yt-dlp can use, and where each keeps its profiles (Firefox moved its folder
@@ -258,6 +287,12 @@ class Streamer:
                              capture_output=True, text=True, timeout=60).stdout.split()
         return any(k.startswith("video,0") for k in out), any(k.startswith("audio") for k in out)
 
+    def _is_mp4(self, path):
+        """MP4, MOV and M4V files (ffmpeg's "mov" family), the only ones the -ignore_editlist option exists for."""
+        out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=format_name", "-of", "default=nw=1:nk=1", path],
+                             capture_output=True, text=True, timeout=60).stdout   # e.g. mov,mp4,m4a,3gp,3g2,mj2
+        return "mov" in out.strip().split(",")
+
     def _youtube_urls(self):
         """Direct picture and sound addresses for an online video, from yt-dlp."""
         self.emit("status", "Getting the video from the web...")
@@ -323,6 +358,11 @@ class Streamer:
                 raise StreamError(f"File not found: {path}")
             has_video, has_sound = self._probe(path)
             loop = ["-stream_loop", "-1"] if s.loop else []
+            # Looping an MP4 drifted the sound ~20 ms earlier every time round (measured -62 ms after 4 loops of a
+            # 2-minute file): ffmpeg trims the sound's start-up padding (from the file's edit list) differently on
+            # later loops. Ignoring the edit list treats every loop the same, so sound and picture stay together.
+            if s.loop and self._is_mp4(path):
+                loop = ["-ignore_editlist", "1"] + loop
             what = f"'{os.path.basename(path)}'" + (" (looping)" if s.loop else "")
             if has_video:
                 args += ["-re", *loop, "-i", path]
@@ -346,10 +386,16 @@ class Streamer:
         else:
             raise StreamError(f"Unknown source {s.source}")
 
+        if s.encoder not in working_encoders():
+            names = {"nvenc": "NVIDIA graphics card", "vaapi": "AMD or Intel graphics (VA-API)", "cpu": "processor"}
+            raise StreamError(f"Encoding with the {names.get(s.encoder, s.encoder)} doesn't work on this PC. "
+                              f"Pick another video encoding: {', '.join(names[e] for e in working_encoders())}.")
         codec, hw_tail = self._video_codec()
         if s.encoder == "vaapi":
             args = args[:1] + ["-vaapi_device", "/dev/dri/renderD128"] + args[1:]
-        vf = f"scale=-2:'min({s.height},trunc(ih/2)*2)'" + hw_tail
+        # The fps filter sets the frame rate. Left to -r alone, turning 60 fps into 30 shows each frame two frames
+        # late (measured: sound 70 ms early); the filter keeps every frame at its own time.
+        vf = f"fps={s.fps},scale=-2:'min({s.height},trunc(ih/2)*2)'" + hw_tail
         if s.encoder != "vaapi":
             vf += ",format=yuv420p"
         sound = (["-c:a", "aac", "-b:a", s.audio_bitrate, "-ar", "48000", "-ac", "2"] if has_sound else ["-an"])

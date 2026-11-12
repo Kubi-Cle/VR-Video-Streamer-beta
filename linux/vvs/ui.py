@@ -289,10 +289,13 @@ class Window(Adw.ApplicationWindow):
                                   if self.cfg.get("bitrate", "4M") in ["2M", "4M", "6M", "8M"] else 1)
         enc_names = [("nvenc", "NVIDIA graphics card"), ("vaapi", "AMD or Intel graphics (VA-API)"),
                      ("cpu", "Processor (x264)")]
+        # Only the ones that work here: a saved choice that no longer works (new driver or graphics card) falls back
+        enc_names = [(k, n) for k, n in enc_names if k in engine.working_encoders()]
         self.enc_keys = [k for k, _ in enc_names]
         self.encoder = Adw.ComboRow(title="Video encoding", subtitle="The graphics card uses much less CPU",
                                     model=Gtk.StringList.new([n for _, n in enc_names]))
-        self.encoder.set_selected(self.enc_keys.index(self.cfg.get("encoder", engine.default_encoder())))
+        saved_encoder = self.cfg.get("encoder", engine.default_encoder())
+        self.encoder.set_selected(self.enc_keys.index(saved_encoder if saved_encoder in self.enc_keys else engine.default_encoder()))
         self.tunnel = Adw.ComboRow(title="Link type", model=Gtk.StringList.new(
             ["Free Cloudflare link (new address each time)", "Your permanent Cloudflare link"]))
         self.tunnel.set_selected(1 if self.cfg.get("tunnel") == "permanent" else 0)
@@ -530,9 +533,9 @@ class Window(Adw.ApplicationWindow):
             return
         s = self.streamer.s
         fixes = []
-        if s.encoder == "cpu" and engine.has_nvidia():
+        if s.encoder == "cpu" and "nvenc" in engine.working_encoders():
             fixes.append("set Video encoding to NVIDIA graphics card")
-        elif s.encoder == "cpu" and engine.has_vaapi():
+        elif s.encoder == "cpu" and "vaapi" in engine.working_encoders():
             fixes.append("set Video encoding to AMD or Intel graphics")
         if s.fps == 60:
             fixes.append("set Frames per second to 30")

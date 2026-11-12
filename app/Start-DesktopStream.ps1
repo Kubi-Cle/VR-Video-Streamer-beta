@@ -296,6 +296,9 @@ switch ($Source) {
         $hasVideo = [bool]($kinds | Where-Object { $_ -match '^video,0' })
         $hasAudio = [bool]($kinds | Where-Object { $_ -match '^audio' })
         $loopArgs = if ($Loop) { @("-stream_loop", "-1") } else { @() }
+        # Looping an MP4 drifts the sound ~20 ms earlier every time round unless its edit list is ignored, which
+        # only MP4/MOV files have (the option stops ffmpeg for any other kind of file)
+        if ($Loop -and ((& $ffprobe -v error -show_entries format=format_name -of default=nw=1:nk=1 $File) -split ',') -contains 'mov') { $loopArgs = @("-ignore_editlist", "1") + $loopArgs }
         if ($hasVideo) {
             $ffArgs += @("-re") + $loopArgs + @("-i", $File)
             $maps = @("-map", "0:v:0")
@@ -352,8 +355,9 @@ $video = switch ($Encoder) {
     # x264's sliced threads (from -tune zerolatency) drop capture to ~2 fps when there's an audio input
     default { @("-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-x264-params", "sliced-threads=0", "-profile:v", "main") }
 }
-# Shrink to $Height if bigger, never upscale; keep both sides even for H.264
-$videoFilter = "scale=-2:'min($Height,trunc(ih/2)*2)'"
+# Shrink to $Height if bigger, never upscale; keep both sides even for H.264. The fps filter sets the frame
+# rate: left to -r alone, turning 60 fps into 30 shows each frame two frames late (sound 70 ms early).
+$videoFilter = "fps=$Fps,scale=-2:'min($Height,trunc(ih/2)*2)'"
 $subtitleFont = if ($SubtitleFont -and (Test-Path -LiteralPath $SubtitleFont)) { $SubtitleFont } else { Join-Path $env:WINDIR "Fonts\arial.ttf" }
 # A file path as a filter option's value. It's escaped twice, once for the option and once for the filter graph,
 # so a drive's colon, an apostrophe in a user name, a comma or a bracket can't break the filter.
