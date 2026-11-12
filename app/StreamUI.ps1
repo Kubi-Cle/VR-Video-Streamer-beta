@@ -165,6 +165,11 @@ $cbEncoder.SelectedIndex = if ($savedEncoder -eq 0 -or ($savedEncoder -gt 0 -and
                            elseif ($hasIntel -and (Test-Encoder "h264_qsv")) { 3 }
                            else { 0 }
 
+# Frames per second: 30 unless 60 was picked last time
+$fpsChoices = @(30, 60)
+foreach ($f in $fpsChoices) { [void]$cbFps.Items.Add("$f") }
+$cbFps.SelectedIndex = [Math]::Max(0, [array]::IndexOf($fpsChoices, [int]"0$($script:settings.Fps)"))
+
 $linkBoxes = @{ public = $tbPublic; remote = $tbRemote }
 foreach ($pair in @(@($btnCopyPublic, $tbPublic), @($btnCopyRemote, $tbRemote))) {
     $pair[0].Tag = $pair[1]
@@ -207,6 +212,7 @@ function Update-SlowWarning($streamTime) {
         $fixes = @()
         $gpu = if ($hasNvidia) { 1 } elseif ($hasAmd) { 2 } elseif ($hasIntel) { 3 } else { 0 }
         if ($script:streamEncoder -eq "cpu" -and $gpu) { $fixes += "set Encoder to $($encoders[$gpu].Name)" }
+        if ($script:streamFps -eq 60) { $fixes += "set Frames per second to 30" }
         if ($script:streamQuality -lt $qualities.Count - 1) { $fixes += "pick a lower Quality" }
         $lblSlowTitle.Text = "Your PC can't encode the stream fast enough (only $([int]($speed * 100))% speed)"
         $lblSlowDetail.Text = "The picture is falling behind the sound, so viewers see them out of sync. " +
@@ -381,13 +387,14 @@ function Save-Choices {
     }
     $s.Quality = $qualities[[Math]::Max(0, $cbQuality.SelectedIndex)].Name
     $s.Encoder = $encoders[[Math]::Max(0, $cbEncoder.SelectedIndex)].Value
+    $s.Fps = "$($fpsChoices[[Math]::Max(0, $cbFps.SelectedIndex)])"
     $s.Tunnel = $tunnels[[Math]::Max(0, $cbTunnel.SelectedIndex)].Value
     $s.Public = [bool]$chkPublic.IsChecked
     $s.Loop = [bool]$chkLoop.IsChecked
     $s.Repeat = [bool]$chkRepeat.IsChecked
     Request-SaveSettings
 }
-foreach ($c in $cbMonitor, $cbWindow, $cbQuality, $cbEncoder, $cbTunnel) { $c.Add_SelectionChanged({ Save-Choices }) }
+foreach ($c in $cbMonitor, $cbWindow, $cbQuality, $cbEncoder, $cbTunnel, $cbFps) { $c.Add_SelectionChanged({ Save-Choices }) }
 foreach ($c in $chkPublic, $chkLoop, $chkRepeat) { $c.Add_Click({ Save-Choices }) }
 foreach ($c in $rbMonitor, $rbWindow, $rbFile) { $c.Add_Checked({ Save-Choices }) }
 $chkLoop.IsChecked = [bool]$script:settings.Loop
@@ -524,7 +531,7 @@ function New-FilePlayer($path, $height, $stream, $media) {
     if (-not $media) { return }
     $w = [int][Math]::Round($height * 16 / 9 / 2) * 2
     $tag = "vvs-$PID-$([Environment]::TickCount)"
-    $p = New-Object PipePlayer($ffmpegExe, $file, $audioFile, $options, $tag, $w, $height, $Fps, $media.Duration, $media.HasVideo, $media.HasAudio)
+    $p = New-Object PipePlayer($ffmpegExe, $file, $audioFile, $options, $tag, $w, $height, $script:Fps, $media.Duration, $media.HasVideo, $media.HasAudio)
     $p.Loop = [bool]$chkLoop.IsChecked
     $p.VolumePercent = [int]$sliderVolume.Value
     $p.EvenOutVolume = [bool]$chkEvenOut.IsChecked
@@ -1318,6 +1325,7 @@ $btnFwd.Add_Click({ if ($script:player -and $script:player.Duration -gt 0) { $sc
 $script:proc = $null
 $script:player = $null
 $btnStart.Add_Click({ try {
+        $script:Fps = $fpsChoices[[Math]::Max(0, $cbFps.SelectedIndex)]
         $script:streamHwnd = 0
         $script:subsNotice = ""; $script:ytNotice = ""
         $a = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Quote $StreamScript))
@@ -1415,9 +1423,10 @@ $btnStart.Add_Click({ try {
         }
         $q = $qualities[$cbQuality.SelectedIndex]
         $script:streamQuality = $cbQuality.SelectedIndex
+        $script:streamFps = $script:Fps
         $script:streamEncoder = $encoders[$cbEncoder.SelectedIndex].Value
         Reset-SlowWarning
-        $a += @("-Height", $q.Height, "-Bitrate", $q.Bitrate, "-AudioBitrate", $audioQualities[$cbAudioQuality.SelectedIndex].Value, "-Encoder", $encoders[$cbEncoder.SelectedIndex].Value)
+        $a += @("-Fps", $script:Fps, "-Height", $q.Height, "-Bitrate", $q.Bitrate, "-AudioBitrate", $audioQualities[$cbAudioQuality.SelectedIndex].Value, "-Encoder", $encoders[$cbEncoder.SelectedIndex].Value)
 
         foreach ($tb in $linkBoxes.Values) { $tb.Text = "" }
         # A stopped stream's tools can hold on to their logs for a moment, so each start gets new ones
@@ -1678,7 +1687,7 @@ function Get-ProblemReport {
         "AI tool: $(Find-AiTool)"
         "Program folder: $PSScriptRoot"
         "Source: $(if ($rbMonitor.IsChecked) { 'monitor' } elseif ($rbWindow.IsChecked) { 'program' } else { 'file or online video' })"
-        "Quality: $($cbQuality.SelectedItem); encoder: $($cbEncoder.SelectedItem); link service: $($cbTunnel.SelectedItem); public: $($chkPublic.IsChecked)"
+        "Quality: $($cbQuality.SelectedItem); $($cbFps.SelectedItem) fps; encoder: $($cbEncoder.SelectedItem); link service: $($cbTunnel.SelectedItem); public: $($chkPublic.IsChecked)"
         "Status: $($lblStat.Text)  /  $($lblStatus.Text)"
         "Subtitles: $($lblSubs.Text)"
         "Player error: $(if ($script:player) { $script:player.LastError })"

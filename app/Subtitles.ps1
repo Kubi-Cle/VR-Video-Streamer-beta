@@ -284,7 +284,7 @@ function Get-Settings {
                    Volume = 100; EvenOut = $false; Card = $true; PermanentHost = ""; Preview = $true; AudioBitrate = "128k"
                    # The window's choices, so it opens the way it was left. Lists are lines of text, since an empty
                    # list read back from JSON can't be told apart from none saved. $null = never chosen.
-                   Source = ""; Monitor = ""; WindowProgram = ""; Quality = ""; Encoder = ""; Tunnel = ""; Public = $true
+                   Source = ""; Monitor = ""; WindowProgram = ""; Quality = ""; Encoder = ""; Fps = ""; Tunnel = ""; Public = $true
                    Loop = $false; Repeat = $false; SoundPicks = $null; SoundQuiet = ""; SoundVolumes = ""; SoundDelay = 0
                    UpdateCheck = $true }
     try {
